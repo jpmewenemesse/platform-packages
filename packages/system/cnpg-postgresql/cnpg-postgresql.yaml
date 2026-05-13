@@ -28,8 +28,9 @@ modules:
   - name: main
     timeout: 10m
     source:
-      local:
-        path: ./chart
+      oci:
+        repository: quay.io/okdp/charts/cnpg-postgresql
+        tag: 0.1.0
     values: |
       replicaCount: 1
       fullnameOverride: {{ regexReplaceAll "-rw.*" .Context.defaultDatabaseServer.provider.endpoints.host "" }}
