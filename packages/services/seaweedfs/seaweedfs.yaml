@@ -291,7 +291,7 @@ modules:
         extraVolumes: |
           - name: auth-config
             configMap:
-              name: {{ .Release.metadata.name }}-auth-config
+              name: {{ .Release.metadata.name }}-auth-config-seaweedfs-auth-config
   
         extraVolumeMounts: |
           - name: auth-config
