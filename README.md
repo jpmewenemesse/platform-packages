@@ -31,7 +31,6 @@ packages/
 └── services/           # Services
     ├── superset/
     ├── jupyterhub/
-    ├── seaweedfs/
     └── ...
 platform-packages-values.yaml   # OCI publish target (packageRepository), the source of truth used by CI
 ```
@@ -75,7 +74,7 @@ for pkg in packages/system/*/; do
 done
 
 # Build specific package
-kubocd package ./packages/services/seaweedfs/seaweedfs.yaml --ociRepoPrefix quay.io/okdp/platform-packages
+kubocd package ./packages/services/jupyterhub/jupyterhub.yaml --ociRepoPrefix quay.io/okdp/platform-packages
 ```
 
 ### Build Output
