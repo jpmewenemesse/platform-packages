@@ -15,7 +15,7 @@
 #
 
 apiVersion: v1alpha1
-name: trinodb
+name: trino
 #tag: 480-p01
 # Currently, the UI requires the version to conform to SemVer (https://simversion.github.io/)
 # https://github.com/OKDP/okdp-ui/blob/main/src/app/shared/utils/utils.ts#L131
