@@ -26,7 +26,6 @@ packages/
 ├── system/             # Infrastructure & system packages
 │   ├── okdp-server/
 │   ├── okdp-ui/
-│   ├── keycloak/
 │   └── ...
 └── services/           # Services
     ├── superset/
