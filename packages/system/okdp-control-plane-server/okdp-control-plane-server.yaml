@@ -28,7 +28,7 @@ usage:
 schema:
   parameters:
     properties:
-      imageRepository: { type: string, default: "quay.io/okdp/okdp-control-plane-server", description: "Server image repository." }
+      imageRepository: { type: string, default: "quay.io/okdp/images/okdp-control-plane-server", description: "Server image repository." }
       imageTag: { type: string, default: "0.8.0", description: "Server image tag. Not empty on purpose: empty resolves to the chart appVersion, which lags the published images." }
       consoleHost: { type: string, description: "Console host, used verbatim as the single allowed origin. Defaults to okdp-ui.<ingress suffix>." }
       kubocdNamespace: { type: string, default: "kubocd-system" }
