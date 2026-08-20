@@ -19,7 +19,7 @@
 
 apiVersion: v1alpha1
 name: superset
-tag: 6.0.0-p02
+tag: 6.0.0-p03
 protected: false
 description: |
   Apache Superset - Enterprise business intelligence platform for modern data teams.
