@@ -382,6 +382,7 @@ outputs:
     contract: iceberg-catalog
     values:
       uri: "https://polaris-{{ .Release.spec.targetNamespace }}.{{ .Context.ingress.suffix }}/api/catalog"
+      internalUri: "http://{{ .Release.metadata.name }}-main.{{ .Release.spec.targetNamespace }}.svc.cluster.local:8181/api/catalog"
       realm: "{{ (index .Parameters.realms 0).name }}"
 roles:
   - data-catalog
