@@ -196,7 +196,7 @@ modules:
 
       advancedConfig:
         polaris.realm-context.header-name: "Polaris-Realm"
-        # Spark and Trino does not pass the header
+        # Spark and Trino do not pass the header
         # polaris.realm-context.require-header: false
         quarkus.http.cors.enabled: "true"
 
