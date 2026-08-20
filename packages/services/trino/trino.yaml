@@ -34,21 +34,30 @@ usage:
 schema:
   parameters:
     properties:
-      metastore: { title: "Catalogs | Hive metastore | | order:1", type: connectionRef, contract: hive, required: true, description: "Hive metastore connection backing the hive catalog." }
-      storage: { title: "Catalogs | Object store | | order:2", type: connectionRef, contract: s3, required: true, description: "S3 object store connection backing the hive catalog." }
-      s3SecretRef: { title: "Catalogs | S3 credentials secret | | order:3", type: string, required: true, description: "This instance's own S3 identity. Secret with keys: accessKey, secretKey." }
-      hiveCatalog: { title: "Catalogs | Hive catalog name | | order:4 columns:2", type: string, default: hive, description: "Name of the hive catalog." }
-      icebergCatalogs:
-        title: "Catalogs | Iceberg REST catalogs | | order:5"
+      hiveCatalogs:
+        title: "Catalogs | Hive catalogs | | order:1"
         type: array
-        description: "Iceberg REST catalogs (Polaris), one Trino catalog per item. Empty runs with the hive catalog only."
+        description: "Hive catalogs, one Trino catalog per item, each on its own metastore and object store."
+        items:
+          properties:
+            name: { type: string, required: true, description: "Trino catalog name." }
+            metastore: { type: connectionRef, contract: hive, required: true, description: "Hive metastore connection backing this catalog." }
+            storage: { type: connectionRef, contract: s3, required: true, description: "S3 object store connection backing this catalog." }
+            s3SecretRef: { type: string, description: "S3 identity used against this store. Secret with keys: accessKey, secretKey. Defaults to the instance s3SecretRef." }
+      icebergCatalogs:
+        title: "Catalogs | Iceberg REST catalogs | | order:2"
+        type: array
+        description: "Iceberg REST catalogs (Polaris), one Trino catalog per item, each on its own object store."
         items:
           properties:
             name: { type: string, required: true, description: "Trino catalog name." }
             catalog: { type: connectionRef, contract: iceberg-catalog, required: true, description: "Iceberg REST catalog connection." }
+            storage: { type: connectionRef, contract: s3, required: true, description: "S3 object store connection backing this catalog." }
             warehouse: { type: string, description: "Polaris catalog used as the warehouse. Defaults to the realm published on the connection." }
             oidcSecretRef: { type: string, description: "OAuth client Trino uses against this catalog. Secret with keys: client_id, client_secret. Defaults to creds-<release>-oauth2." }
             oauth2Scope: { type: string, default: "PRINCIPAL_ROLE:ALL", description: "OAuth2 scope requested. Polaris rejects the connector default." }
+            s3SecretRef: { type: string, description: "S3 identity used against this store. Secret with keys: accessKey, secretKey. Defaults to the instance s3SecretRef." }
+      s3SecretRef: { title: "Catalogs | S3 credentials secret | | order:3", type: string, description: "Default S3 identity of this instance, used by any catalog that does not name its own. Secret with keys: accessKey, secretKey." }
       numWorkers: { type: integer, default: 1, title: "Sizing | Workers | stepper | order:1 columns:2 advanced:true", description: "Number of workers" }
       workerCpu: { type: number, default: 0.5, multipleOf: 0.25, title: "Sizing | Worker CPU (vCPU) | | order:2 columns:2 advanced:true", description: "Worker CPU request in vCPU." }
       workerMemoryGi: { type: number, default: 2, multipleOf: 0.25, title: "Sizing | Worker memory (GiB) | | order:3 columns:2 advanced:true", description: "Worker memory (GiB) used for Kubernetes requests/limits (recommended: request=limit)." }
@@ -261,21 +270,29 @@ modules:
 
       {{- $trinoEndpoint := printf "trino-%s.%s" $namespace $domain -}}
 
+      {{- $hiveCatalogs := .Parameters.hiveCatalogs | default list -}}
+      {{- $icebergCatalogs := .Parameters.icebergCatalogs | default list -}}
+      {{- $defaultS3Secret := .Parameters.s3SecretRef | default "" -}}
+
       image:
         repository: trinodb/trino
         tag: 480
 
+      {{- if or $hiveCatalogs $icebergCatalogs }}
       catalogs:
-        {{ .Parameters.hiveCatalog }}: |
+        {{- range $c := $hiveCatalogs }}
+        {{- $envPrefix := upper (replace "-" "_" $c.name) }}
+        {{ $c.name }}: |
           connector.name=hive
-          hive.metastore.uri={{ .Parameters.metastore.thriftUri }}
+          hive.metastore.uri={{ $c.metastore.thriftUri }}
           fs.native-s3.enabled=true
-          s3.endpoint={{ .Parameters.storage.apiUrl }}
+          s3.endpoint={{ $c.storage.apiUrl }}
           s3.path-style-access=true
-          s3.region={{ .Parameters.storage.region }}
-          s3.aws-access-key=${ENV:S3_ACCESS_KEY}
-          s3.aws-secret-key=${ENV:S3_SECRET_ACCESS}
-        {{- range $ic := (.Parameters.icebergCatalogs | default list) }}
+          s3.region={{ $c.storage.region }}
+          s3.aws-access-key=${ENV:S3_ACCESS_KEY_{{ $envPrefix }}}
+          s3.aws-secret-key=${ENV:S3_SECRET_ACCESS_{{ $envPrefix }}}
+        {{- end }}
+        {{- range $ic := $icebergCatalogs }}
         {{- $envPrefix := upper (replace "-" "_" $ic.name) }}
         {{ $ic.name }}: |
           connector.name=iceberg
@@ -288,12 +305,13 @@ modules:
           iceberg.rest-catalog.oauth2.server-uri={{ $ic.catalog.internalUri | default $ic.catalog.uri }}/v1/oauth/tokens
           iceberg.rest-catalog.vended-credentials-enabled=false
           fs.native-s3.enabled=true
-          s3.endpoint={{ $.Parameters.storage.apiUrl }}
+          s3.endpoint={{ $ic.storage.apiUrl }}
           s3.path-style-access=true
-          s3.region={{ $.Parameters.storage.region }}
-          s3.aws-access-key=${ENV:S3_ACCESS_KEY}
-          s3.aws-secret-key=${ENV:S3_SECRET_ACCESS}
+          s3.region={{ $ic.storage.region }}
+          s3.aws-access-key=${ENV:S3_ACCESS_KEY_{{ $envPrefix }}}
+          s3.aws-secret-key=${ENV:S3_SECRET_ACCESS_{{ $envPrefix }}}
         {{- end }}
+      {{- end }}
 
       env:
         - name: TRINO_OAUTH_CLIENT_ID
@@ -318,7 +336,7 @@ modules:
               key: client_secret
               {{- end }}
 
-        {{- range $ic := (.Parameters.icebergCatalogs | default list) }}
+        {{- range $ic := $icebergCatalogs }}
         {{- $envPrefix := upper (replace "-" "_" $ic.name) }}
         - name: ICEBERG_OAUTH_CLIENT_ID_{{ $envPrefix }}
           valueFrom:
@@ -344,19 +362,22 @@ modules:
         - name: TRUSTSTORE_PASSWORD
           value: ""
 
-        # The s3 identity of THIS instance: an ordinary parameter naming its
-        # credentials Secret.
-        - name: S3_ACCESS_KEY
+        {{- range $c := concat $hiveCatalogs $icebergCatalogs }}
+        {{- $envPrefix := upper (replace "-" "_" $c.name) }}
+        {{- $s3Secret := $c.s3SecretRef | default $defaultS3Secret }}
+        {{- if not $s3Secret }}{{ fail (printf "catalog %q: no S3 credentials, set s3SecretRef on the catalog or on the release" $c.name) }}{{ end }}
+        - name: S3_ACCESS_KEY_{{ $envPrefix }}
           valueFrom:
             secretKeyRef:
-              name: {{ .Parameters.s3SecretRef }}
+              name: {{ $s3Secret }}
               key: accessKey
 
-        - name: S3_SECRET_ACCESS
+        - name: S3_SECRET_ACCESS_{{ $envPrefix }}
           valueFrom:
             secretKeyRef:
-              name: {{ .Parameters.s3SecretRef }}
+              name: {{ $s3Secret }}
               key: secretKey
+        {{- end }}
 
       coordinator:
         resources:
@@ -471,9 +492,9 @@ modules:
           opa.log-responses=true
           opa.log-requests=true
       {{- end }}
-outputs:
-  # One trino Connection per instance, named 'kcd-<release>-endpoint'. Two
-  # releases of this package = two distinct Connections.
+# One trino Connection per instance, named 'kcd-<release>-endpoint'. Two
+# releases of this package = two distinct Connections.
+outputs: |
   - name: endpoint
     contract: trino
     values:
@@ -483,8 +504,12 @@ outputs:
       catalogs:
         - tpch
         - tpcds
-        - "{{ .Parameters.hiveCatalog }}"
-        - "{{ .Parameters.icebergCatalogName }}"
+        {{- range $c := (.Parameters.hiveCatalogs | default list) }}
+        - "{{ $c.name }}"
+        {{- end }}
+        {{- range $c := (.Parameters.icebergCatalogs | default list) }}
+        - "{{ $c.name }}"
+        {{- end }}
 roles:
   - interactive-query
 dependencies:
