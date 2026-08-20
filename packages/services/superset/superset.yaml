@@ -318,7 +318,8 @@ modules:
         # databases existing: the schema upgrade then fails on a database not
         # created yet, and the job burns its retries.
         init:
-          createAdmin: false
+          # Without OIDC there is no other way in, so the local admin stays.
+          createAdmin: {{ not $oidcEnabled }}
           initContainers:
             - name: wait-for-databases
               image: postgres:16-alpine
