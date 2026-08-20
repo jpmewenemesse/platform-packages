@@ -37,6 +37,7 @@ schema:
         title: "Catalog | Realms | | order:3"
         type: array
         required: true
+        minItems: 1
         description: "Realm definitions passed to the bootstrap, main and principals modules. The first one is the default realm, published on the catalog Connection and preselected in the console."
         items:
           properties:
@@ -383,7 +384,7 @@ outputs:
     values:
       uri: "https://polaris-{{ .Release.spec.targetNamespace }}.{{ .Context.ingress.suffix }}/api/catalog"
       internalUri: "http://{{ .Release.metadata.name }}-main.{{ .Release.spec.targetNamespace }}.svc.cluster.local:8181/api/catalog"
-      realm: "{{ (index .Parameters.realms 0).name }}"
+      realm: "{{ if not .Parameters.realms }}{{ fail `realms must carry at least one entry` }}{{ end }}{{ (index .Parameters.realms 0).name }}"
 roles:
   - data-catalog
   - iceberg-catalog
