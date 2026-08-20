@@ -223,7 +223,8 @@ modules:
         grant_types:
           - "authorization_code"
           - "client_credentials"
-        scope: "{{ printf "%s %s" .Parameters.defaultclientScopes .Parameters.optionalClientScopes }}"
+        # Keycloak realm client scopes granted to the registered client.
+        scope: "web-origins acr roles profile groups basic email address phone organization offline_access microprofile-jwt"
       tls:
         insecure: false
         certificate: "certs-bundle"
@@ -234,7 +235,7 @@ modules:
           OIDC_CLIENT_ID: ".client_id"
           OIDC_CLIENT_SECRET: ".client_secret"
           OIDC_ISSUER_URL: "{{ $oidcIssuerUri }}"
-          OIDC_SCOPES: "{{ printf "%d %o" .Parameters.defaultclientScopes .Parameters.optionalClientScopes | join " " }}"
+          OIDC_SCOPES: "{{ .Context.oidc.scope }}"
 
   - name: main
     timeout: 10m
