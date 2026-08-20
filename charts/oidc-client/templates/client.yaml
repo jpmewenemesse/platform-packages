@@ -42,7 +42,8 @@ stringData:
   {{- if and $existing $existing.data (index $existing.data .) }}
   {{- $current = index $existing.data . | b64dec }}
   {{- end }}
-  {{ . }}: {{ $current | default (randAlphaNum 64) }}
+  {{/* 32 random bytes, hex encoded: JupyterHub rejects anything else. */}}
+  {{ . }}: {{ $current | default (sha256sum (randAlphaNum 64)) }}
   {{- end }}
 ---
 {{/* kubauth only ever sees the hash, never the secret itself. */}}
