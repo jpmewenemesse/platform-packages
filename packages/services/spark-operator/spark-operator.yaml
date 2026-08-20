@@ -96,7 +96,7 @@ modules:
       # Prometheus metrics configuration
       prometheus:
         metrics:
-          enabled: {{ .Parameters.metricsEnabled }}
+          enable: {{ .Parameters.metricsEnabled }}
         podMonitor:
           create: {{ .Parameters.podMonitorEnabled }}
 
@@ -106,13 +106,13 @@ modules:
         logLevel: "{{ .Parameters.controllerLogLevel }}"
         workers: {{ .Parameters.controllerWorkers }}
         rbac:
-          createRole: true
+          create: true
         podSecurityContext:
           fsGroup: null
 
       # Webhook configuration
       webhook:
-        enable: {{ .Parameters.webhookEnabled }}  # enable:, not enabled in helm chart
+        enable: {{ .Parameters.webhookEnabled }}
         podSecurityContext:
           fsGroup: null
 

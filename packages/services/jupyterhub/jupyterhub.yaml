@@ -137,7 +137,7 @@ modules:
       serviceAccount:
         create: true
         name: "spark"
-        automountServiceAccountToken: true
+        automount: true
 
   - name: main
     dependsOn:

@@ -45,7 +45,7 @@ modules:
       serviceAccount:
         create: {{ .Parameters.serviceAccountCreate }}
         name: "{{ .Parameters.serviceAccountName }}"
-        automountServiceAccountToken: {{ .Parameters.automountServiceAccountToken }}
+        automount: {{ .Parameters.automountServiceAccountToken }}
 
 roles:
   - spark-rbac
