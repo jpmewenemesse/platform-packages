@@ -114,16 +114,20 @@ modules:
       local:
         path: ../../../charts/oidc-client
     values: |
-      clientName: "{{ .Release.metadata.name }}"
+      {{- $client := printf "%s-%s" .Release.metadata.name .Release.spec.targetNamespace }}
+      {{- $hubUrl := printf "https://jupyterhub-%s.%s" .Release.spec.targetNamespace .Context.ingress.suffix }}
+      # The clients live in one shared namespace, so the name carries the
+      # project namespace: two same-named Releases would share a client.
+      clientName: "{{ $client }}"
       oidcNamespace: "{{ (.Context.oidc.kubauth | default dict).namespace }}"
-      credentialsSecretName: "{{ .Release.metadata.name }}-oidc-creds"
+      credentialsSecretName: "{{ $client }}-oidc-creds"
       # Encrypts JupyterHub auth state.
       extraGeneratedKeys:
         - JUPYTERHUB_CRYPT_KEY
       redirectURIs:
-        - "https://{{ .Release.metadata.name }}.{{ .Context.ingress.suffix }}/hub/oauth_callback"
+        - "{{ $hubUrl }}/hub/oauth_callback"
       displayName: "JupyterHub ({{ .Release.metadata.name }})"
-      description: "OIDC client for JupyterHub {{ .Release.metadata.name }}"
+      description: "OIDC client for JupyterHub {{ .Release.metadata.name }} in {{ .Release.spec.targetNamespace }}"
 
   - name: spark-rbac
     timeout: 10m
@@ -201,7 +205,7 @@ modules:
            below reads it the same. */}}
       {{- $oidcSecret := printf "creds-%s-oauth2" .Release.metadata.name -}}
       {{- if eq (.Context.oidc.clientProvisioning | default "existing") "kubauth" -}}
-        {{- $oidcSecret = printf "%s-oidc-creds" .Release.metadata.name -}}
+        {{- $oidcSecret = printf "%s-%s-oidc-creds" .Release.metadata.name .Release.spec.targetNamespace -}}
       {{- end }}
       # Fix resource naming conflicts by using release name as prefix
       fullnameOverride: "{{ .Release.metadata.name }}"
