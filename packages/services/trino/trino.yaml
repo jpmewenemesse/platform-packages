@@ -287,7 +287,7 @@ modules:
           hive.metastore.uri={{ $c.metastore.thriftUri }}
           fs.native-s3.enabled=true
           s3.endpoint={{ $c.storage.apiUrl }}
-          s3.path-style-access=true
+          s3.path-style-access={{ $c.storage.pathStyle | default false }}
           s3.region={{ $c.storage.region }}
           s3.aws-access-key=${ENV:S3_ACCESS_KEY_{{ $envPrefix }}}
           s3.aws-secret-key=${ENV:S3_SECRET_ACCESS_{{ $envPrefix }}}
@@ -306,7 +306,7 @@ modules:
           iceberg.rest-catalog.vended-credentials-enabled=false
           fs.native-s3.enabled=true
           s3.endpoint={{ $ic.storage.apiUrl }}
-          s3.path-style-access=true
+          s3.path-style-access={{ $ic.storage.pathStyle | default false }}
           s3.region={{ $ic.storage.region }}
           s3.aws-access-key=${ENV:S3_ACCESS_KEY_{{ $envPrefix }}}
           s3.aws-secret-key=${ENV:S3_SECRET_ACCESS_{{ $envPrefix }}}
