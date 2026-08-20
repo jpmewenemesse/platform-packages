@@ -55,7 +55,7 @@ schema:
           properties:
             name: { type: string, required: true }
             trino: { type: connectionRef, contract: trino, required: true }
-            catalog: { type: string, default: hive }
+            catalog: { type: string, required: true, description: "Trino catalog to expose, as named on the Trino instance." }
   context:
     properties:
       oidc:
