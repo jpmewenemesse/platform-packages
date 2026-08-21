@@ -2,7 +2,7 @@
 # the connection string from the Secret named by metadataSecret.
 apiVersion: v1alpha1
 name: airflow
-tag: 3.2.1-p03
+tag: 3.2.1-p04
 protected: false
 description: |
   Apache Airflow 2.9.3 - Workflow orchestration platform with Spark Operator integration
@@ -29,6 +29,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, required: true }
       oidc:
         required: true
         properties:
@@ -38,6 +39,12 @@ schema:
           enabled: { type: boolean, default: true }
           scope: { type: string, default: "openid profile email groups" }
           insecureSkipVerify: { type: boolean, default: false }
+          clientProvisioning: { type: string, default: existing }
+          # Read only when clientProvisioning is dcr.
+          dcr:
+            properties:
+              registrationUrl: { type: string }
+              authMethod: { type: string }
   parameters:
     properties:
       db: { type: connectionRef, contract: database-server, required: true, title: "Cluster | Metadata database | | order:2", description: "Connection to the SQL database server hosting the Airflow metadata database." }
@@ -50,6 +57,45 @@ schema:
       dagsGitSync: { type: object, properties: {}, additionalProperties: true, title: "DAGs | Git sync | | order:1", description: "Chart dags.gitSync values, credentialsSecret.name carries the git credentials Secret name." }
 
 modules:
+  # Registers the OIDC client through anonymous Dynamic Client Registration.
+  # Active only when the platform provisions clients that way; the credentials
+  # land in a Secret carrying the same keys the deployment reads.
+  - name: oidc-dcr
+    enabled: '{{ eq (.Context.oidc.clientProvisioning | default "existing") "dcr" }}'
+    timeout: 10m
+    source:
+      oci:
+        repository: quay.io/adaltas/oidc-dcr
+        tag: 0.3.2
+    values: |
+      {{- $namespace := printf "%v" .Release.spec.targetNamespace -}}
+      {{- $release := printf "%v" .Release.metadata.name -}}
+      {{- $dcr := .Context.oidc.dcr | default dict -}}
+      {{- if and (eq (.Context.oidc.clientProvisioning | default "existing") "dcr") (ne ($dcr.authMethod | default "") "anonymous") }}
+      {{- fail (printf "oidc.dcr.authMethod %q is not supported: this package registers anonymously" ($dcr.authMethod | default "")) }}
+      {{- end }}
+
+      ttl_seconds: 30
+      registration_url: {{ $dcr.registrationUrl | quote }}
+      request:
+        application_type: web
+        client_name: "{{ $release }}-{{ $namespace }}"
+        redirect_uris:
+          - "https://airflow-{{ $namespace }}.{{ .Context.ingress.suffix }}/auth/oauth-authorized/oidc"
+        grant_types:
+          - "authorization_code"
+          - "client_credentials"
+        scope: {{ .Context.oidc.scope | quote }}
+      tls:
+        insecure: false
+        certificate: "certs-bundle"
+      secret: "{{ $release }}-{{ $namespace }}-dcr"
+      mapping:
+        use_default: false
+        key_mapping:
+          client_id: ".client_id"
+          client_secret: ".client_secret"
+
   - name: internal-secrets
     source:
       local:
@@ -86,7 +132,10 @@ modules:
       {{- $airflowOidcEnabled := true }}
       {{- if hasKey .Context.oidc "enabled" }}{{- $airflowOidcEnabled = .Context.oidc.enabled }}{{ end }}
       {{- $airflowOidcScope := printf "%s offline_access" (.Context.oidc.scope | default "openid profile email groups") | replace " " "+" }}
+      {{- $airflowDCR := eq (.Context.oidc.clientProvisioning | default "existing") "dcr" }}
+      {{- /* In dcr mode the registration job writes the credentials, under the same keys. */}}
       {{- $airflowOauthSecret := printf "creds-%s-oauth2" .Release.metadata.name }}
+      {{- if $airflowDCR }}{{- $airflowOauthSecret = printf "%s-%s-dcr" .Release.metadata.name .Release.spec.targetNamespace }}{{- end }}
       {{- $airflowOidcRoleMapping := .Parameters.oidcRoleMapping | default dict }}
       {{- $airflowOidcBaseUrl := "" }}
       {{- $airflowOidcAuthUrl := "" }}
@@ -221,9 +270,9 @@ modules:
       ingress:
         apiServer:
           enabled: true
-          ingressClassName: nginx
+          ingressClassName: {{ .Context.ingress.className }}
           annotations:
-            kubernetes.io/ingress.class: nginx
+            kubernetes.io/ingress.class: {{ .Context.ingress.className }}
             cert-manager.io/cluster-issuer: {{ .Context.certificateIssuers.selfSigned.name }}
             nginx.ingress.kubernetes.io/proxy-body-size: "0"
 

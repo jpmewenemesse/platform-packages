@@ -18,7 +18,7 @@
 # name this instance's own identities.
 apiVersion: v1alpha1
 name: spark-history-server
-tag: 3.5.1-p05
+tag: 3.5.1-p06
 protected: false
 description: |
   Spark History Server - Monitoring and debugging interface for Apache Spark applications.
@@ -55,6 +55,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, required: true }
       oidc:
         required: true
         properties:
@@ -107,7 +108,7 @@ modules:
 
       ingress:
         enabled: true
-        ingressClassName: "nginx"
+        ingressClassName: {{ .Context.ingress.className }}
         annotations:
           nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
           cert-manager.io/cluster-issuer: {{ .Context.certificateIssuers.selfSigned.name }}
@@ -218,7 +219,7 @@ modules:
 
       ingress:
         enabled: true
-        className: "nginx"
+        className: {{ .Context.ingress.className }}
         annotations:
           nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
           cert-manager.io/cluster-issuer: {{ .Context.certificateIssuers.selfSigned.name }}

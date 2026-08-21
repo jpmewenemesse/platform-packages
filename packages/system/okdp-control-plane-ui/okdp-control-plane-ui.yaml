@@ -16,7 +16,7 @@
 
 apiVersion: v1alpha1
 name: okdp-control-plane-ui
-tag: 0.8.0-p01
+tag: 0.8.0-p02
 protected: false
 description: |
   OKDP UI - Frontend web interface for the Open Kubernetes Data Platform
@@ -44,6 +44,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, required: true }
       certificateIssuers:
         required: true
         properties:
@@ -78,7 +79,7 @@ modules:
         adminRole: {{ .Parameters.adminRole | quote }}
 
       ingress:
-        className: nginx
+        className: {{ .Context.ingress.className }}
         host: {{ $host | quote }}
         clusterIssuer: {{ .Context.certificateIssuers.selfSigned.name | quote }}
         tlsSecretName: okdp-ui-tls

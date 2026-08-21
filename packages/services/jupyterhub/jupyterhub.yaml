@@ -19,7 +19,7 @@
 
 apiVersion: v1alpha1
 name: jupyterhub
-tag: 4.3.3-p04
+tag: 4.3.3-p05
 protected: false
 description: |
   JupyterHub - Multi-user interactive development environment for data science and machine learning.
@@ -89,6 +89,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, required: true }
       storageClass:
         required: true
         properties:
@@ -318,7 +319,7 @@ modules:
           # rejects them with a 413.
           nginx.ingress.kubernetes.io/proxy-body-size: "64m"
           cert-manager.io/cluster-issuer: "{{ .Context.certificateIssuers.selfSigned.name }}"
-        ingressClassName: nginx
+        ingressClassName: {{ .Context.ingress.className }}
         hosts:
           - {{ $jupyterHost }}
         tls:

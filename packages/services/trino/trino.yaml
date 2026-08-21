@@ -21,7 +21,7 @@ name: trino
 #tag: 480-p01
 # Currently, the UI requires the version to conform to SemVer (https://simversion.github.io/)
 # https://github.com/OKDP/okdp-ui/blob/main/src/app/shared/utils/utils.ts#L131
-tag: 480.0.0-p20
+tag: 480.0.0-p21
 protected: false
 description: |
   Apache Trino - Distributed SQL query engine designed for large-scale data processing across multiple data sources.
@@ -82,6 +82,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, required: true }
       oidc:
         required: true
         properties:
@@ -90,6 +91,12 @@ schema:
           tokenUrl: { type: string, required: true }
           jwksUri: { type: string, required: true }
           scope: { type: string, default: "openid profile email groups" }
+          clientProvisioning: { type: string, default: existing }
+          # Read only when clientProvisioning is dcr.
+          dcr:
+            properties:
+              registrationUrl: { type: string }
+              authMethod: { type: string }
 
 modules:
   - name: internal-secrets
@@ -220,9 +227,14 @@ modules:
       {{- $domain := printf "%v" .Context.ingress.suffix -}}
 
       {{- $oidcIssuerUri := .Context.oidc.issuerUri -}}
+      {{- $dcr := .Context.oidc.dcr | default dict -}}
+      {{- if and (eq (.Context.oidc.clientProvisioning | default "existing") "dcr") (ne ($dcr.authMethod | default "") "anonymous") }}
+      {{- fail (printf "oidc.dcr.authMethod %q is not supported: this package registers anonymously" ($dcr.authMethod | default "")) }}
+      {{- end }}
+      {{- $oidcRegistrationUrl := $dcr.registrationUrl -}}
 
       ttl_seconds: 30
-      registration_url: "{{ $oidcIssuerUri }}/clients-registrations/openid-connect/"
+      registration_url: "{{ $oidcRegistrationUrl }}"
       request:
         application_type: web
         client_name: "{{ $release }}-{{ $namespace }}"
@@ -427,7 +439,7 @@ modules:
 
       ingress:
         enabled: true
-        className: nginx
+        className: {{ .Context.ingress.className }}
         annotations:
           cert-manager.io/cluster-issuer: "{{ .Context.certificateIssuers.selfSigned.name }}"
           nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"

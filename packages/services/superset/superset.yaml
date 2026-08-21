@@ -19,7 +19,7 @@
 
 apiVersion: v1alpha1
 name: superset
-tag: 6.0.0-p03
+tag: 6.0.0-p04
 protected: false
 description: |
   Apache Superset - Enterprise business intelligence platform for modern data teams.
@@ -76,6 +76,7 @@ schema:
         required: true
         properties:
           suffix: { type: string, required: true }
+          className: { type: string, required: true }
 modules:
   - name: internal-secrets
     source:
@@ -391,9 +392,9 @@ modules:
 
         ingress:
           enabled: true
-          ingressClassName: "nginx"
+          ingressClassName: {{ .Context.ingress.className }}
           annotations:
-            kubernetes.io/ingress.class: nginx
+            kubernetes.io/ingress.class: {{ .Context.ingress.className }}
             cert-manager.io/cluster-issuer: {{ .Context.certificateIssuers.selfSigned.name }}
             acme.cert-manager.io/http01-edit-in-place: "true"
             # kubernetes.io/tls-acme: "true"
