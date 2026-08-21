@@ -18,7 +18,7 @@
 # iceberg-catalog Connection (output catalog).
 apiVersion: v1alpha1
 name: polaris
-tag: 1.3.0-incubating-p03
+tag: 1.3.0-incubating-p05
 protected: false
 description: |
   Apache Polaris is an open-source, fully-featured catalog for Apache Iceberg™.
@@ -296,9 +296,8 @@ modules:
     values: |
 
       {{- $namespace := printf "%v" .Release.spec.targetNamespace -}}
-      {{- $domain := printf "%v" .Context.ingress.suffix -}}
 
-      {{- $polarisEndpointAPIUrl := printf "https://polaris-%s.%s" $namespace $domain -}}
+      {{- $polarisInternalUrl := printf "http://%s-main.%s.svc.cluster.local:8181" .Release.metadata.name $namespace -}}
 
       phase: "principals"
 
@@ -310,21 +309,14 @@ modules:
           pullPolicy: IfNotPresent
 
         polaris:
-          url: {{ $polarisEndpointAPIUrl }}
+          url: {{ $polarisInternalUrl }}
 
-        caCertPath: /cacerts/ca.crt
+        # The chart defaults this to a bundle path, and curl refuses a --cacert
+        # that does not exist. The in-cluster call is plain HTTP.
+        caCertPath: ""
 
       realms:
         {{- toYaml .Parameters.realms | nindent 2 }}
-
-      extraVolumes:
-        - name: cacerts
-          secret:
-            secretName: certs-bundle
-
-      extraVolumeMounts:
-        - name: cacerts
-          mountPath: /cacerts
 
   - name: console
     dependsOn:
