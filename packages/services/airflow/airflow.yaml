@@ -1,6 +1,8 @@
+# Consumes db (database-server) as a deployment gate only: the chart reads
+# the connection string from the Secret named by metadataSecret.
 apiVersion: v1alpha1
 name: airflow
-tag: 3.2.1-p3
+tag: 3.2.1-p04
 protected: false
 description: |
   Apache Airflow 2.9.3 - Workflow orchestration platform with Spark Operator integration
@@ -11,32 +13,55 @@ usage:
     Pods, ingress, and certificate provisioning may still take a few minutes.
 
     Access the Airflow UI:
-      URL: {{ .Context.airflow.endpoint.url | replace "{{ .Release.namespace }}" .Release.spec.targetNamespace | replace "{{ .Release.metadata.name }}" .Release.metadata.name | replace "{{ .Context.ingress.suffix }}" .Context.platform.ingress.suffix }}
+      URL: https://airflow-{{ .Release.spec.targetNamespace }}.{{ .Context.ingress.suffix }}
       Authenticate via the configured OIDC provider.
 
 schema:
-  parameters:
-    properties:
-      enableDCR: { type: boolean, default: false, description: "Whether to enable Dynamic Client Registration" }
   context:
     properties:
-      platform:
+      certificateIssuers:
         required: true
         properties:
-          certificateIssuers:
-            required: true
+          selfSigned:
             properties:
-              selfSigned:
-                properties:
-                  name: { type: string, required: true }
-          ingress:
-            required: true
+              name: { type: string, required: true }
+      ingress:
+        required: true
+        properties:
+          suffix: { type: string, required: true }
+          className: { type: string, required: true }
+      oidc:
+        required: true
+        properties:
+          issuerUri: { type: string, required: true }
+          authUrl: { type: string, required: true }
+          tokenUrl: { type: string, required: true }
+          enabled: { type: boolean, default: true }
+          scope: { type: string, default: "openid profile email groups" }
+          insecureSkipVerify: { type: boolean, default: false }
+          clientProvisioning: { type: string, default: existing }
+          # Read only when clientProvisioning is dcr.
+          dcr:
             properties:
-              suffix: { type: string, required: true }
+              registrationUrl: { type: string }
+              authMethod: { type: string }
+  parameters:
+    properties:
+      db: { type: connectionRef, contract: database-server, required: true, title: "Cluster | Metadata database | | order:2", description: "Connection to the SQL database server hosting the Airflow metadata database." }
+      metadataSecret: { type: string, required: true, title: "Cluster | Metadata connection secret | | order:3", description: "Secret with key connection holding the full SQLAlchemy connection string." }
+      # CeleryExecutor is left out: it needs a broker and workers, and this package
+      # pins workers.replicas to 0 with no Redis.
+      schedulerMemoryGi: { type: number, default: 1, multipleOf: 0.25, title: "Sizing | Scheduler memory (GiB) | | order:1 columns:2 advanced:true" }
+      webserverMemoryGi: { type: number, default: 1, multipleOf: 0.25, title: "Sizing | Webserver memory (GiB) | | order:2 columns:2 advanced:true" }
+      oidcRoleMapping: { type: object, properties: {}, additionalProperties: true, title: "Authentication | Role mapping | | order:4 advanced:true", description: "Map of OIDC groups to lists of Airflow roles." }
+      dagsGitSync: { type: object, properties: {}, additionalProperties: true, title: "DAGs | Git sync | | order:1", description: "Chart dags.gitSync values, credentialsSecret.name carries the git credentials Secret name." }
 
 modules:
+  # Registers the OIDC client through anonymous Dynamic Client Registration.
+  # Active only when the platform provisions clients that way; the credentials
+  # land in a Secret carrying the same keys the deployment reads.
   - name: oidc-dcr
-    enabled: "{{ .Parameters.enableDCR }}"
+    enabled: '{{ eq (.Context.oidc.clientProvisioning | default "existing") "dcr" }}'
     timeout: 10m
     source:
       oci:
@@ -45,43 +70,22 @@ modules:
     values: |
       {{- $namespace := printf "%v" .Release.spec.targetNamespace -}}
       {{- $release := printf "%v" .Release.metadata.name -}}
-      {{- $domain := printf "%v" .Context.platform.ingress.suffix -}}
+      {{- $dcr := .Context.oidc.dcr | default dict -}}
+      {{- if and (eq (.Context.oidc.clientProvisioning | default "existing") "dcr") (ne ($dcr.authMethod | default "") "anonymous") }}
+      {{- fail (printf "oidc.dcr.authMethod %q is not supported: this package registers anonymously" ($dcr.authMethod | default "")) }}
+      {{- end }}
 
-      {{- $oidcId := .Context.airflow.oidc.provider -}}
-      {{- $oidcProvider := (index .Context $oidcId).provider -}}
-
-      {{- $oidcIssuerUri := $oidcProvider.issuerUri
-            | replace "{{ .Release.namespace }}" $namespace
-            | replace "{{ .Release.metadata.name }}" $release
-            | replace "{{ .Context.ingress.suffix }}" $domain -}}
-
-      {{- $oidcRegistrationUrl := $oidcProvider.endpoints.clientRegistrationUrl
-            | replace "{{ .Context.ingress.suffix }}" $domain -}}
-
-      {{- $airflowUrl := .Context.airflow.endpoint.url
-            | replace "{{ .Release.namespace }}" $namespace
-            | replace "{{ .Release.metadata.name }}" $release
-            | replace "{{ .Context.ingress.suffix }}" $domain -}}
-
-      {{- $airflowScopes := "" -}}
-      {{- range .Context.defaultIdp.settings.clients -}}
-        {{- if eq .clientId "airflow" -}}
-          {{- $airflowScopes = concat .defaultClientScopes .optionalClientScopes | join " " -}}
-        {{- end -}}
-      {{- end -}}
-      
       ttl_seconds: 30
-      registration_url: "{{ $oidcRegistrationUrl }}"
+      registration_url: {{ $dcr.registrationUrl | quote }}
       request:
         application_type: web
         client_name: "{{ $release }}-{{ $namespace }}"
         redirect_uris:
-          - "{{ $airflowUrl }}/auth/oauth-authorized/oidc"
-        logo_uri: "https://raw.githubusercontent.com/apache/airflow/c3f9da4846c8bde6b70aff771615d39e010decb0/airflow-core/docs/img/logos/wordmark_1.svg"
+          - "https://airflow-{{ $namespace }}.{{ .Context.ingress.suffix }}/auth/oauth-authorized/oidc"
         grant_types:
           - "authorization_code"
           - "client_credentials"
-        scope: "{{ $airflowScopes }}"
+        scope: {{ .Context.oidc.scope | quote }}
       tls:
         insecure: false
         certificate: "certs-bundle"
@@ -89,10 +93,23 @@ modules:
       mapping:
         use_default: false
         key_mapping:
-          OIDC_CLIENT_ID: ".client_id"
-          OIDC_CLIENT_SECRET: ".client_secret"
-          OIDC_ISSUER_URL: "{{ $oidcIssuerUri }}"
-          OIDC_SCOPES: "{{ $airflowScopes }}"
+          client_id: ".client_id"
+          client_secret: ".client_secret"
+
+  - name: internal-secrets
+    source:
+      local:
+        path: ../../../charts/internal-secrets
+    values: |
+      secrets:
+        - name: "creds-{{ .Release.metadata.name }}-internal"
+          fields:
+            - fieldName: api-secret-key
+              encoding: base64
+              length: "32"
+            - fieldName: jwt-secret
+              encoding: base64
+              length: "64"
   - name: main
     timeout: 15m
     source:
@@ -101,47 +118,35 @@ modules:
         chart: airflow
         version: 1.21.0
     values: |
-      executor: KubernetesExecutor
-      
+      executor: "KubernetesExecutor"
+
       defaultAirflowTag: "3.2.1"
       airflowVersion: "3.2.1"
-      
+
       {{- $namespace := printf "%v" .Release.spec.targetNamespace -}}
       {{- $release := printf "%v" .Release.metadata.name -}}
-      {{- $domain := printf "%v" .Context.platform.ingress.suffix -}}
-      {{- $airflowUrl := .Context.airflow.endpoint.url
-            | replace "{{ .Release.namespace }}" $namespace
-            | replace "{{ .Release.metadata.name }}" $release
-            | replace "{{ .Context.ingress.suffix }}" $domain -}}
-      {{- $airflowHost := regexReplaceAll "^https?://" $airflowUrl "" -}}
-      {{- $airflowGitSync := .Context.airflow.dags.gitSync | default dict }}
+      {{- $domain := printf "%v" .Context.ingress.suffix -}}
+      {{- $airflowHost := printf "airflow-%s.%s" $namespace $domain -}}
+      {{- $airflowGitSync := .Parameters.dagsGitSync | default dict }}
       {{- $airflowGitSyncValues := omit $airflowGitSync "credentialsSecret" }}
-      {{- $airflowOidc := .Context.airflow.oidc | default dict }}
-      {{- $airflowOidcEnabled := $airflowOidc.enabled | default false }}
-      {{- $airflowOidcRoleMapping := $airflowOidc.roleMapping | default dict }}
+      {{- $airflowOidcEnabled := true }}
+      {{- if hasKey .Context.oidc "enabled" }}{{- $airflowOidcEnabled = .Context.oidc.enabled }}{{ end }}
+      {{- $airflowOidcScope := printf "%s offline_access" (.Context.oidc.scope | default "openid profile email groups") | replace " " "+" }}
+      {{- $airflowDCR := eq (.Context.oidc.clientProvisioning | default "existing") "dcr" }}
+      {{- /* In dcr mode the registration job writes the credentials, under the same keys. */}}
+      {{- $airflowOauthSecret := printf "creds-%s-oauth2" .Release.metadata.name }}
+      {{- if $airflowDCR }}{{- $airflowOauthSecret = printf "%s-%s-dcr" .Release.metadata.name .Release.spec.targetNamespace }}{{- end }}
+      {{- $airflowOidcRoleMapping := .Parameters.oidcRoleMapping | default dict }}
       {{- $airflowOidcBaseUrl := "" }}
       {{- $airflowOidcAuthUrl := "" }}
       {{- $airflowOidcTokenUrl := "" }}
       {{- $airflowOidcIssuerUri := "" }}
       {{- if $airflowOidcEnabled }}
-        {{- $oidcId := required "context.airflow.oidc.provider is required when Airflow OIDC is enabled" $airflowOidc.provider -}}
-        {{- $oidcProvider := (index .Context $oidcId).provider -}}
-        {{- $airflowOidcBaseUrl = (required "context airflow OIDC provider baseUri is required" $oidcProvider.baseUri)
-              | replace "{{ .Release.namespace }}" $namespace
-              | replace "{{ .Release.metadata.name }}" $release
-              | replace "{{ .Context.ingress.suffix }}" $domain -}}
-        {{- $airflowOidcAuthUrl = (required "context airflow OIDC provider authUrl is required" $oidcProvider.endpoints.authUrl)
-              | replace "{{ .Release.namespace }}" $namespace
-              | replace "{{ .Release.metadata.name }}" $release
-              | replace "{{ .Context.ingress.suffix }}" $domain -}}
-        {{- $airflowOidcTokenUrl = (required "context airflow OIDC provider tokenUrl is required" $oidcProvider.endpoints.tokenUrl)
-              | replace "{{ .Release.namespace }}" $namespace
-              | replace "{{ .Release.metadata.name }}" $release
-              | replace "{{ .Context.ingress.suffix }}" $domain -}}
-        {{- $airflowOidcIssuerUri = (required "context airflow OIDC provider issuerUri is required" $oidcProvider.issuerUri)
-              | replace "{{ .Release.namespace }}" $namespace
-              | replace "{{ .Release.metadata.name }}" $release
-              | replace "{{ .Context.ingress.suffix }}" $domain -}}
+        {{- $oidc := .Context.oidc -}}
+        {{- $airflowOidcBaseUrl = printf "%s/protocol/openid-connect" $oidc.issuerUri -}}
+        {{- $airflowOidcAuthUrl = $oidc.authUrl -}}
+        {{- $airflowOidcTokenUrl = $oidc.tokenUrl -}}
+        {{- $airflowOidcIssuerUri = $oidc.issuerUri -}}
       {{- end }}
 
       extraEnv: |
@@ -149,23 +154,13 @@ modules:
         - name: AIRFLOW_OIDC_CLIENT_ID
           valueFrom:
             secretKeyRef:
-              {{- if .Parameters.enableDCR }}
-              name: {{ $release }}-{{ $namespace }}-dcr
-              key: OIDC_CLIENT_ID
-              {{- else }}
-              name: {{ $airflowOidc.credentialsSecret.name }}
-              key: {{ $airflowOidc.credentialsSecret.clientIdKey }}
-              {{- end }}
+              name: {{ $airflowOauthSecret }}
+              key: client_id
         - name: AIRFLOW_OIDC_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
-              {{- if .Parameters.enableDCR }}
-              name: {{ $release }}-{{ $namespace }}-dcr
-              key: OIDC_CLIENT_SECRET
-              {{- else }}
-              name: {{ $airflowOidc.credentialsSecret.name }}
-              key: {{ $airflowOidc.credentialsSecret.clientSecretKey }}
-              {{- end }}
+              name: {{ $airflowOauthSecret }}
+              key: client_secret
         - name: AIRFLOW_OIDC_API_BASE_URL
           value: {{ $airflowOidcBaseUrl | quote }}
         - name: AIRFLOW_OIDC_ACCESS_TOKEN_URL
@@ -175,10 +170,10 @@ modules:
         - name: AIRFLOW_OIDC_SERVER_METADATA_URL
           value: {{ printf "%s/.well-known/openid-configuration" $airflowOidcIssuerUri | quote }}
         - name: AIRFLOW_OIDC_SCOPE
-          value: {{ $airflowOidc.scope | quote }}
+          value: {{ $airflowOidcScope | quote }}
       {{- end }}
         - name: INSECURE_VERIFY_TLS
-          value: {{ if ($airflowOidc.insecureSkipVerify | default false) }}"false"{{ else }}"true"{{ end }}
+          value: {{ if .Context.oidc.insecureSkipVerify }}"false"{{ else }}"true"{{ end }}
         - name: REQUESTS_CA_BUNDLE
           value: "/cacerts/ca.crt"
         - name: SSL_CERT_FILE
@@ -186,13 +181,24 @@ modules:
         - name: CURL_CA_BUNDLE
           value: "/cacerts/ca.crt"
 
+      # The CA bundle the variables above point at, mounted in every Airflow
+      # container: a component without it fails any HTTPS call, and the CLI
+      # itself talks to the API server over HTTPS.
+      volumes:
+        - name: cacerts
+          secret:
+            secretName: certs-bundle
+      volumeMounts:
+        - name: cacerts
+          mountPath: /cacerts
+
       apiServer:
         resources:
           requests:
             memory: "384Mi"
             cpu: "200m"
           limits:
-            memory: "1024Mi"
+            memory: "{{ .Parameters.webserverMemoryGi }}Gi"
             cpu: "1000m"
         startupProbe:
           failureThreshold: 24
@@ -202,7 +208,7 @@ modules:
           import os
 
           from flask_appbuilder.security.manager import AUTH_OAUTH
-      
+
           verify_tls = os.environ.get("INSECURE_VERIFY_TLS", "true").lower() == "true"
           oauth_verify = os.environ.get("REQUESTS_CA_BUNDLE") if verify_tls else False
 
@@ -238,15 +244,6 @@ modules:
               },
           ]
         {{- end }}
-        
-        extraVolumes:
-          - name: cacerts
-            secret:
-              secretName: certs-bundle
-      
-        extraVolumeMounts:
-          - name: cacerts
-            mountPath: /cacerts
 
       scheduler:
         resources:
@@ -254,7 +251,7 @@ modules:
             memory: "384Mi"
             cpu: "200m"
           limits:
-            memory: "1024Mi"
+            memory: "{{ .Parameters.schedulerMemoryGi }}Gi"
             cpu: "1000m"
         startupProbe:
           failureThreshold: 12
@@ -273,10 +270,10 @@ modules:
       ingress:
         apiServer:
           enabled: true
-          ingressClassName: {{ .Context.platform.ingress.className }}
+          ingressClassName: {{ .Context.ingress.className }}
           annotations:
-            kubernetes.io/ingress.class: {{ .Context.platform.ingress.className }}
-            cert-manager.io/cluster-issuer: {{ .Context.platform.certificateIssuers.selfSigned.name }}
+            kubernetes.io/ingress.class: {{ .Context.ingress.className }}
+            cert-manager.io/cluster-issuer: {{ .Context.certificateIssuers.selfSigned.name }}
             nginx.ingress.kubernetes.io/proxy-body-size: "0"
 
           hosts:
@@ -289,7 +286,7 @@ modules:
       # full SQLAlchemy connection string. The chart skips generating its own airflow-metadata
       # secret, so credentials never appear in the package values.
       data:
-        metadataSecretName: {{ .Context.airflow.database.credentialsSecret.name }}
+        metadataSecretName: {{ .Parameters.metadataSecret }}
 
       dags:
         mountPath: /opt/airflow/dags
@@ -298,24 +295,24 @@ modules:
         gitSync:
           {{- toYaml $airflowGitSyncValues | nindent 4 }}
           {{- with $airflowGitSync.credentialsSecret }}
-          credentialsSecret: {{ required "context.airflow.dags.gitSync.credentialsSecret.name is required" .name | quote }}
+          credentialsSecret: {{ required "dagsGitSync.credentialsSecret.name is required" .name | quote }}
           {{- end }}
-          {{- if or .Context.platform.proxy.httpProxy .Context.platform.proxy.httpsProxy .Context.platform.proxy.noProxy }}
+          {{- if or .Context.proxy.httpProxy .Context.proxy.httpsProxy .Context.proxy.noProxy }}
           env:
-            {{- if .Context.platform.proxy.httpProxy }}
+            {{- if .Context.proxy.httpProxy }}
             - name: HTTP_PROXY
-              value: {{ .Context.platform.proxy.httpProxy | quote }}
+              value: {{ .Context.proxy.httpProxy | quote }}
             {{- end }}
-            {{- if .Context.platform.proxy.httpsProxy }}
+            {{- if .Context.proxy.httpsProxy }}
             - name: HTTPS_PROXY
-              value: {{ .Context.platform.proxy.httpsProxy | quote }}
+              value: {{ .Context.proxy.httpsProxy | quote }}
             {{- end }}
-            {{- if .Context.platform.proxy.noProxy }}
+            {{- if .Context.proxy.noProxy }}
             - name: NO_PROXY
-              value: {{ .Context.platform.proxy.noProxy | quote }}
+              value: {{ .Context.proxy.noProxy | quote }}
             {{- end }}
           {{- end }}
-      
+
       dagProcessor:
         enabled: true
       flower:
@@ -350,7 +347,7 @@ modules:
         #  limits:
         #   memory: "256Mi"
         #   cpu: "200m"
-      
+
       migrateDatabaseJob:
         enabled: true
         useHelmHooks: false
@@ -370,10 +367,11 @@ modules:
           enable_proxy_fix: "True"
           cookie_secure: "True"
           cookie_samesite: "Lax"
-      
-      apiSecretKeySecretName: {{ .Context.airflow.advanced.config.security.credentialsSecret.name }}
-      jwtSecretName: {{ .Context.airflow.advanced.config.security.credentialsSecret.name }}
-      fernetKeySecretName: {{ .Context.airflow.advanced.config.security.credentialsSecret.name }}
+
+      # The fernet key is left to the chart: it mints it in a pre-install hook,
+      # so it is not rotated on upgrades. The generator cannot produce its format.
+      apiSecretKeySecretName: {{ printf "creds-%s-internal" .Release.metadata.name }}
+      jwtSecretName: {{ printf "creds-%s-internal" .Release.metadata.name }}
 
 roles:
   - airflow

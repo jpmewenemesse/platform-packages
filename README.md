@@ -1,6 +1,6 @@
 [![ci](https://github.com/okdp/platform-packages/actions/workflows/ci.yml/badge.svg)](https://github.com/okdp/platform-packages/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/okdp/platform-packages)](https://github.com/okdp/platform-packages/releases/latest)&ensp;&ensp;
-[![KuboCD](https://img.shields.io/badge/kubocd-v0.2.2-green.svg)](https://github.com/kubocd/kubocd)&ensp;&ensp;
+[![KuboCD](https://img.shields.io/badge/kubocd-v0.3.2-green.svg)](https://github.com/kubocd/kubocd)&ensp;&ensp;
 [![Kubernetes](https://img.shields.io/badge/kubernetes-1.28+-blue.svg)](https://kubernetes.io/)&ensp;&ensp;
 [![License Apache2](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 <a href="https://okdp.io">
@@ -11,33 +11,45 @@
 
 This repository builds and publishes the OKDP platform packages used to operate platform services with [KuboCD](https://www.kubocd.io/).
 
-It is **packages-only**: it owns the package definitions under `packages/` and the CI that builds and publishes them as OCI artifacts. It does **not** own the deployment layer (releases, contexts, Flux/KuboCD bootstrap). Deployment lives in [`OKDP/okdp-sandbox`](https://github.com/OKDP/okdp-sandbox), which consumes the packages published here.
+It is **packages-only**: it owns the package definitions under `packages/`, the Helm charts under `charts/` that some of them bundle, and the CI that builds and publishes the result as OCI artifacts. It does **not** own the deployment layer (releases, contexts, Flux/KuboCD bootstrap). Deployment lives in [`OKDP/okdp-sandbox`](https://github.com/OKDP/okdp-sandbox), which consumes the packages published here.
 
 ## KuboCD Concepts
 
 - **Package**: a versioned OCI artifact that bundles a KuboCD application descriptor and one or more Helm charts. The manifests under `packages/` define the packages published by this repository.
+- **Connection**: a typed endpoint identified by a contract. A package consumes one through a `connectionRef` parameter and publishes one through `outputs`. The contracts used here are `s3`, `database-server`, `hive`, `iceberg-catalog` and `trino`.
 
 Packages are deployed through KuboCD **Releases** that reference layered **Contexts**. Those deployment resources are maintained in [`OKDP/okdp-sandbox`](https://github.com/OKDP/okdp-sandbox), not here.
 
 ## Structure
 
 ```
+charts/                 # Helm charts owned here, bundled into the packages that reference them
+├── internal-secrets/
+└── oidc-client/
 packages/
-├── system/             # Infrastructure & system packages
-│   ├── okdp-server/
-│   ├── okdp-ui/
-│   └── ...
-└── services/           # Services
-    ├── superset/
+├── system/             # Platform foundation packages
+│   ├── okdp-control-plane-server/
+│   └── okdp-control-plane-ui/
+└── services/           # Data and application service packages
+    ├── airflow/
+    ├── hive-metastore/
     ├── jupyterhub/
-    └── ...
+    ├── okdp-examples/
+    ├── polaris/
+    ├── spark-defaults/
+    ├── spark-history-server/
+    ├── spark-operator/
+    ├── spark-rbac/
+    ├── superset/
+    └── trino/
 platform-packages-values.yaml   # OCI publish target (packageRepository), the source of truth used by CI
 ```
 
 Key paths:
 
-- [`packages/system`](./packages/system): infrastructure and platform foundation packages.
+- [`packages/system`](./packages/system): platform foundation packages.
 - [`packages/services`](./packages/services): data and application service packages.
+- [`charts`](./charts): Helm charts maintained in this repository. Packages pull them through `source.local.path` and the build bundles them into the OCI artifact.
 - [`platform-packages-values.yaml`](./platform-packages-values.yaml): the OCI repository packages are published to.
 
 ## Building Packages
@@ -48,7 +60,7 @@ The OCI repository packages are published to is defined once in [`platform-packa
 
 ```bash
 # Build a system package
-kubocd package ./packages/system/okdp-server/okdp-server.yaml --ociRepoPrefix quay.io/okdp/platform-packages
+kubocd package ./packages/system/okdp-control-plane-server/okdp-control-plane-server.yaml --ociRepoPrefix quay.io/okdp/platform-packages
 
 # Build a service package
 kubocd package ./packages/services/superset/superset.yaml --ociRepoPrefix quay.io/okdp/platform-packages
@@ -58,7 +70,7 @@ kubocd package ./packages/services/superset/superset.yaml --ociRepoPrefix quay.i
 
 ```bash
 # Using a different OCI registry
-kubocd package ./packages/system/okdp-server/okdp-server.yaml --ociRepoPrefix myregistry.io/my-org/packages
+kubocd package ./packages/system/okdp-control-plane-ui/okdp-control-plane-ui.yaml --ociRepoPrefix myregistry.io/my-org/packages
 
 # Using a different prefix for packages
 kubocd package ./packages/services/jupyterhub/jupyterhub.yaml --ociRepoPrefix harbor.company.com/okdp-prod
@@ -80,7 +92,7 @@ kubocd package ./packages/services/jupyterhub/jupyterhub.yaml --ociRepoPrefix qu
 
 Packages are pushed to: `{ociRepoPrefix}/{package-name}:{tag}`
 
-Example: `quay.io/okdp/platform-packages/superset:4.0.0-p02`
+Example: `quay.io/okdp/platform-packages/superset:6.0.0-p02`
 
 ## GitHub CI and Publishing
 
