@@ -174,13 +174,25 @@ jobs:
         run: echo "Every package is already published under its current tag. Nothing to do."
 
       - name: Build and push KuboCD packages into CI registry (${{ inputs.ci_registry }}) 📦
-        if: inputs.publish_to_registry == 'false'
+        if: inputs.publish_to_registry == 'false' && env.KUBOCD_PACKAGES != ''
         run: |
+          set -uo pipefail
+          FAILED=""
+
           for package in ${KUBOCD_PACKAGES}
           do
+             echo "::group::kubocd package ${package}"
              echo "kubocd package ${package} --ociRepoPrefix $OCI_REPO_PREFIX"
-             kubocd package ${package} --ociRepoPrefix $OCI_REPO_PREFIX
+             # One broken package must not stop the others: collect the failures
+             # and report them all at the end.
+             kubocd package ${package} --ociRepoPrefix $OCI_REPO_PREFIX || FAILED="${FAILED} ${package}"
+             echo "::endgroup::"
           done
+
+          if [[ -n "${FAILED}" ]]; then
+            echo "::error title=Package build failed::${FAILED# }"
+            exit 1
+          fi
         env:
           KCD_OCI_GHCR_IO_USER: ${{ github.actor }}
           KCD_OCI_GHCR_IO_SECRET: ${{ github.token }}
